@@ -29,6 +29,8 @@ export interface SampleDone {
   maxDensity: number;
   rMax: number;
   elapsedMs: number;
+  cdfMs: number;
+  sentAt: number;
   cacheHit: boolean;
   electrons: number;
   includedMass: number;

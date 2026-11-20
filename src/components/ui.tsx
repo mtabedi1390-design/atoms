@@ -61,10 +61,12 @@ export function Toggle({ label, checked, onChange }: { label: string; checked: b
   );
 }
 
-export function Badge({ kind, children }: { kind: "measured" | "evaluated" | "predicted" | "unavailable" | "exact" | "estimate"; children: ReactNode }) {
+export function Badge({ kind, children }: { kind: "theoretical" | "semi-empirical" | "measured" | "evaluated" | "predicted" | "unavailable" | "exact" | "estimate"; children: ReactNode }) {
   const c: Record<string, string> = {
     measured: "border-emerald-700 text-emerald-300",
     evaluated: "border-sky-700 text-sky-300",
+    theoretical: "border-amber-700 text-amber-300",
+    "semi-empirical": "border-amber-700 text-amber-300",
     predicted: "border-amber-700 text-amber-300",
     unavailable: "border-zinc-700 text-zinc-500",
     exact: "border-emerald-700 text-emerald-300",

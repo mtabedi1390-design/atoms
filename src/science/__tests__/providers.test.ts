@@ -6,8 +6,8 @@ import { HF_ATOMS, PROVIDERS, graspProvider, hfDatasetFor, integrateDatasetElect
 const dir = join(process.cwd(), "src/data/hf");
 
 describe("offline HF datasets (real PySCF output)", () => {
-  it("bundles exactly the six computed benchmark atoms with the expected schema", () => {
-    expect(HF_ATOMS).toEqual([1, 2, 6, 7, 8, 10]);
+  it("bundles exactly the 18 computed benchmark atoms with the expected schema", () => {
+    expect(HF_ATOMS).toEqual(Array.from({length:18}, (_,i) => i+1));
     for (const z of HF_ATOMS) {
       const d = hfDatasetFor(z)!;
       expect(d.schema).toBe("atoms.hf-radial.v1");
@@ -50,7 +50,7 @@ describe("offline HF datasets (real PySCF output)", () => {
       expect(d.hamiltonian).toMatch(/non-relativistic/);
     }
     const files = readdirSync(dir).filter((f) => f.endsWith(".json"));
-    expect(files.sort()).toEqual(["C.json", "H.json", "He.json", "N.json", "Ne.json", "O.json"]);
+    expect(files.sort()).toEqual(HF_ATOMS.map(z => hfDatasetFor(z)!.atom.symbol + ".json").sort());
     // every bundled file is validated at import time; re-read one to prove it is the same data
     const raw = JSON.parse(readFileSync(join(dir, "Ne.json"), "utf8"));
     expect(raw.atom.symbol).toBe("Ne");
@@ -84,7 +84,7 @@ describe("provider selection policy", () => {
     expect(sel.avoided.some((a) => a.id === "grasp-mcdhf" && /GRASP/.test(a.reason))).toBe(true);
   });
   it("registers all providers and marks PySCF available only where data exists", () => {
-    expect(PROVIDERS.map((p) => p.id)).toEqual(["pyscf-hf", "browser-slater", "grasp-mcdhf"]);
+    expect(PROVIDERS.map((p) => p.id)).toEqual(["hydrogenic-exact", "pyscf-hf", "browser-slater", "grasp-mcdhf"]);
     expect(pyscfHFProvider.supports({ Z: 26, observable: "electron-density", accuracy: "quantitative" })).toBe(false);
     expect(pyscfHFProvider.supports({ Z: 6, observable: "electron-density", accuracy: "quantitative" })).toBe(true);
     expect(pyscfHFProvider.compute({ Z: 6, observable: "electron-density", accuracy: "quantitative" })?.metadata.method).toContain("ROHF");

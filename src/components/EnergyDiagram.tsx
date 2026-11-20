@@ -19,7 +19,7 @@ interface Props {
 export function EnergyDiagram({ element, model, activeLabel, onPick }: Props) {
   const levels = useMemo(
     () =>
-      element.subshells.map((s) => {
+      (model === "hydrogenic-exact" ? Array.from({length:7}, (_,i) => ({n:i+1, l:0, label:`n=${i+1}`, occupancy:1})) : element.subshells).map((s) => {
         const E = model === "hydrogenic-exact" ? hydrogenicEnergy_eV(s.n, element.Z) : slaterZeff(element, s).energyEstimate_eV;
         return { ...s, E };
       }),
@@ -32,7 +32,7 @@ export function EnergyDiagram({ element, model, activeLabel, onPick }: Props) {
   const yMax = tf(Emin);
   const sy = (E: number) => padT + (tf(E) / yMax) * (H - padT - padB);
   const cols = 4; // l = 0..3 columns
-  const sx = (l: number) => padL + (l + 0.5) * ((W - padL - padR) / cols);
+  const sx = (l: number) => model === "hydrogenic-exact" ? W/2 : padL + (l + 0.5) * ((W - padL - padR) / cols);
   const ie = element.ionizationEnergy_eV.value;
   const lLetters = ["s", "p", "d", "f"];
 
@@ -40,7 +40,7 @@ export function EnergyDiagram({ element, model, activeLabel, onPick }: Props) {
     <div className="flex flex-col gap-1">
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img" aria-label="Energy level diagram">
         <rect x={padL} y={padT} width={W - padL - padR} height={H - padT - padB} fill="#0a0a0a" stroke="#27272a" strokeWidth={0.5} />
-        {[0, 1, 2, 3].map((l) => (
+        {model !== "hydrogenic-exact" && [0, 1, 2, 3].map((l) => (
           <text key={l} x={sx(l)} y={H - 5} textAnchor="middle" fill="#71717a" fontSize={8}>{lLetters[l]}</text>
         ))}
         {[1, 10, 100, 1000, 1e4, 1e5].filter((v) => v <= Math.abs(Emin) * 1.5).map((v) => (
@@ -55,23 +55,23 @@ export function EnergyDiagram({ element, model, activeLabel, onPick }: Props) {
         {ie !== null && (
           <g>
             <line x1={padL} x2={W - padR} y1={sy(-ie)} y2={sy(-ie)} stroke="#34d399" strokeDasharray="4 2" strokeWidth={0.7} />
-            <text x={W - padR - 2} y={sy(-ie) - 2} textAnchor="end" fill="#34d399" fontSize={6}>exp. 1st IE −{ie.toFixed(2)} eV (NIST)</text>
+            <text x={W - padR - 2} y={sy(-ie) - 2} textAnchor="end" fill="#34d399" fontSize={6}>neutral IE ({element.ionizationEnergy_eV.evidence}) −{ie.toFixed(2)} eV (NIST)</text>
           </g>
         )}
         {levels.map((lv) => {
           const x = sx(lv.l), y = sy(lv.E), w = 44;
-          const active = lv.label === activeLabel;
+          const active = model === "hydrogenic-exact" ? lv.n === Number(activeLabel[0]) : lv.label === activeLabel;
           return (
             <g key={lv.label} className="cursor-pointer" onClick={() => onPick(lv.n, lv.l)}>
               <line x1={x - w / 2} x2={x + w / 2} y1={y} y2={y} stroke={active ? "#fbbf24" : "#d4d4d8"} strokeWidth={active ? 2 : 1} />
               <text x={x - w / 2 - 2} y={y + 3} textAnchor="end" fill={active ? "#fbbf24" : "#a1a1aa"} fontSize={7} fontFamily="monospace">{lv.label}</text>
-              <text x={x + w / 2 + 2} y={y + 3} fill="#71717a" fontSize={6} fontFamily="monospace">{lv.occupancy}e⁻</text>
+              <text x={x + w / 2 + 2} y={y + 3} fill="#71717a" fontSize={6} fontFamily="monospace">{model === "hydrogenic-exact" ? "" : `${lv.occupancy}e⁻`}</text>
             </g>
           );
         })}
       </svg>
       <p className="text-[10px] leading-snug text-zinc-500">
-        Levels: {model === "hydrogenic-exact" ? "exact one-electron E_n = −13.606 Z²/n² eV (hydrogen-like ion, NOT the neutral atom)" : "Slater estimate −13.606 Z_eff²/n*² eV — an empirical screening estimate, not an HF/DFT orbital eigenvalue and not a binding energy"}. The green line is the experimental first ionisation energy (a different physical quantity) for reference.
+        Levels: {model === "hydrogenic-exact" ? "exact one-electron E_n = −13.606 Z²/n² eV (H or one-electron ion for Z > 1)" : "Slater estimate −13.606 Z_eff²/n*² eV — an empirical screening estimate, not an HF/DFT orbital eigenvalue and not a binding energy"}. The green line is the neutral first ionisation energy (a different physical quantity) for reference.
       </p>
     </div>
   );

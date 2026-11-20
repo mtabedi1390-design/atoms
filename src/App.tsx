@@ -3,13 +3,14 @@ import { cn } from "@/utils/cn";
 import { ControlRail } from "@/components/ControlRail";
 import { EnergyDiagram } from "@/components/EnergyDiagram";
 import { Inspector } from "@/components/Inspector";
+import { AtomRadialPlot } from "@/components/AtomRadialPlot";
 import { RadialPlot } from "@/components/RadialPlot";
 import { TelemetryBar } from "@/components/TelemetryBar";
 import { Panel } from "@/components/ui";
 import { elementByZ } from "@/data/elements";
 import { BOHR_PM, radialExtent } from "@/physics/hydrogenic";
 import { effectiveZ } from "@/physics/models";
-import { hfDatasetFor, selectProvider } from "@/science/providers";
+import { hfDatasetFor, pyscfHFProvider, selectProvider } from "@/science/providers";
 import { OrbitalScene, type SceneStats } from "@/render/OrbitalScene";
 import { SamplerClient } from "@/sampling/client";
 import type { SamplingParams } from "@/sampling/sampler";
@@ -36,6 +37,7 @@ export default function App() {
   const [glError, setGlError] = useState<string | null>(null);
   const [workerError, setWorkerError] = useState<string | null>(null);
   const [stats, setStats] = useState<SceneStats>({ fps: 0, drawCalls: 0, points: 0, gpuUploadMs: 0 });
+  const [timing, setTiming] = useState({cdfMs: 0, deliveryMs: 0});
   const [sampleMs, setSampleMs] = useState<number | null>(null);
   const [progress, setProgress] = useState<number | null>(null);
   const [electrons, setElectrons] = useState<number | null>(null);
@@ -48,7 +50,10 @@ export default function App() {
   const layerColors = useMemo(() => Object.fromEntries(element.subshells.map((s, i) => [s.label, LAYER_PALETTE[i % LAYER_PALETTE.length]])), [element]);
   const hfDataset = useMemo(() => hfDatasetFor(state.Z), [state.Z]);
   const useHF = state.mode === "atom" && state.densitySource === "hf" && hfDataset !== null;
-  const providerSelection = useMemo(() => selectProvider({ Z: state.Z, observable: "electron-density", accuracy: "quantitative" }), [state.Z]);
+  const providerSelection = useMemo(() => {
+    const req = { Z: state.Z, observable: "electron-density", accuracy: "quantitative" } as const;
+    return useHF ? {provider: pyscfHFProvider, result: pyscfHFProvider.compute(req), avoided: []} : selectProvider(req);
+  }, [state.Z, useHF]);
   const peaks = useRef(new Map<string, number>());
   const electronTotals = useRef(new Map<string, number>());
 
@@ -81,7 +86,7 @@ export default function App() {
       const ui = state.layers[s.label] ?? { visible: true, opacity: 1 };
       return {
         key: s.label,
-        params: { n: s.n, l: s.l, m: 0, zeff: effectiveZ(state.model, element, s), basis: "complex" as const, count: Math.max(2000, Math.round((state.count * s.occupancy) / total)), seed: state.seed + i, modelId: state.model, mix: "subshell-average" as const, occupancy: s.occupancy },
+        params: { n: s.n, l: s.l, m: 0, zeff: effectiveZ(state.model, element, s), basis: "complex" as const, count: Math.round((state.count * s.occupancy) / total), seed: state.seed + i, modelId: state.model, mix: "subshell-average" as const, occupancy: s.occupancy },
         color: layerColors[s.label],
         visible: ui.visible,
         opacity: ui.opacity,
@@ -89,8 +94,18 @@ export default function App() {
     });
   }, [state.mode, state.n, state.l, state.m, state.model, state.basis, state.count, state.seed, state.layers, element, sub, layerColors, useHF, hfDataset]);
 
+  const latestSpecs = useRef(specs);
+  latestSpecs.current = specs;
   const extentPm = useMemo(() => {
-    if (useHF && hfDataset) return hfDataset.density.rBohr[hfDataset.density.rBohr.length - 1] * BOHR_PM;
+    if (useHF && hfDataset) {
+      const {rBohr: r, rhoElectronPerBohr3: rho, integratedElectrons} = hfDataset.density;
+      let mass = 0;
+      for (let i=1; i<r.length; i++) {
+        mass += 2*Math.PI*(r[i]**2*rho[i]+r[i-1]**2*rho[i-1])*(r[i]-r[i-1]);
+        if (mass >= 0.999*integratedElectrons) return r[i]*BOHR_PM;
+      }
+      return r[r.length-1]*BOHR_PM;
+    }
     return Math.max(...specs.map((s) => radialExtent(s.params.n, s.params.l, s.params.zeff))) * BOHR_PM;
   }, [specs, useHF, hfDataset]);
 
@@ -154,17 +169,17 @@ export default function App() {
     const scene = sceneRef.current, client = clientRef.current;
     if (!scene || !client) return;
     const keep = new Set(specs.map((s) => s.key));
-    scene.removeLayersExcept(keep);
+    const unchanged = new Set(specs.filter(s => lastParams.current.get(s.key) === JSON.stringify(s.params)).map(s => s.key));
+    scene.removeLayersExcept(unchanged);
     client.cancelAllExcept(keep);
-    for (const k of [...lastParams.current.keys()]) if (!keep.has(k)) lastParams.current.delete(k);
-    scene.setSharedMax(null);
-    peaks.current.clear();
-    electronTotals.current.clear();
-    setElectrons(null);
+    for (const k of [...lastParams.current.keys()]) if (!unchanged.has(k)) {
+      lastParams.current.delete(k); peaks.current.delete(k); electronTotals.current.delete(k);
+    }
+    if (unchanged.size < specs.length) { setElectrons(null); setWorkerError(null); }
     for (const spec of specs) {
       const sig = JSON.stringify(spec.params);
       scene.setLayerState(spec.key, spec.opacity, spec.visible);
-      if (lastParams.current.get(spec.key) === sig) continue;
+      if (unchanged.has(spec.key)) continue;
       lastParams.current.set(spec.key, sig);
       setProgress(0);
       client.request(spec.key, spec.params, {
@@ -172,15 +187,18 @@ export default function App() {
         onDone: (res) => {
           setProgress(1);
           setSampleMs(res.elapsedMs);
+          setTiming({cdfMs: res.cdfMs, deliveryMs: Math.max(0, performance.timeOrigin + performance.now() - res.sentAt)});
           setWorkerError(null);
-          scene.setLayer(spec.key, { positionsBohr: res.positions, density: res.density, phase: res.phase, maxDensity: res.maxDensity, color: spec.color }, spec.opacity, spec.visible);
+          const live = latestSpecs.current.find(s => s.key === spec.key);
+          if (!live) return;
+          scene.setLayer(spec.key, { positionsBohr: res.positions, density: res.density, phase: res.phase, maxDensity: res.maxDensity, color: spec.color }, live.opacity, live.visible);
           if (state.mode === "atom") {
             // Absolute peaks (occupancy-weighted) → shared brightness normalisation.
             peaks.current.set(spec.key, res.maxDensity);
             scene.setSharedMax(Math.max(...peaks.current.values()));
           } else scene.setSharedMax(null);
           electronTotals.current.set(spec.key, res.electrons);
-          if (state.mode === "atom") setElectrons([...electronTotals.current.values()].reduce((a, b) => a + b, 0));
+          if (state.mode === "atom") setElectrons(electronTotals.current.size === specs.length ? [...electronTotals.current.values()].reduce((a, b) => a + b, 0) : null);
           else setElectrons(res.electrons);
           if (scene.shaderError) setGlError(`Shader error: ${scene.shaderError}`);
         },
@@ -218,7 +236,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-black text-zinc-200" style={{ fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif" }}>
-      <TelemetryBar element={element} sub={sub} m={state.m} model={state.model} mode={state.mode} densitySource={useHF ? "PySCF HF (bundled)" : state.model === "hydrogenic-exact" ? "exact hydrogenic" : "Slater estimate"} electrons={electrons} samples={specs.reduce((a, s) => a + (s.visible ? s.params.count : 0), 0)} stats={stats} sampleMs={sampleMs} progress={progress} workerError={workerError} />
+      <TelemetryBar timing={timing} basis={state.basis} element={element} sub={sub} m={state.m} model={state.model} mode={state.mode} densitySource={useHF ? "PySCF HF (bundled)" : state.model === "hydrogenic-exact" ? "exact hydrogenic" : "Slater estimate"} electrons={electrons} samples={specs.reduce((a, s) => a + (s.visible ? s.params.count : 0), 0)} stats={stats} sampleMs={sampleMs} progress={progress} workerError={workerError} />
       <div className="flex min-h-0 flex-1">
         <aside className={cn("w-[340px] shrink-0 border-r border-zinc-800 bg-zinc-950 lg:block", mobilePanel === "controls" ? "fixed inset-y-12 left-0 z-20 block w-[88vw] max-w-[340px]" : "hidden")}>
           <ControlRail state={state} element={element} dispatch={dispatch} extentPm={extentPm} layerColors={layerColors} onResetCamera={resetCamera} />
@@ -240,11 +258,13 @@ export default function App() {
             </div>
           )}
           <div className="pointer-events-none absolute bottom-3 left-3 flex flex-col gap-1 text-[10px] text-zinc-400">
-            <ScaleBar extentPm={extentPm} />
+            {element.Z >= 50 && <span className="text-amber-300">Non-relativistic estimate: contraction and spin–orbit splitting unavailable.</span>}
+            {element.Z >= 104 && <span>Predicted neutral configuration · not a measured density</span>}
+            <span>Framing radius: {(extentPm / BOHR_PM).toFixed(1)} a₀ ({extentPm.toFixed(0)} pm) · marker not to scale</span>
             <span>axes: <span className="text-red-400">x</span> <span className="text-green-400">y</span> <span className="text-blue-400">z (polar)</span> · drag: orbit · right-drag: pan · wheel: zoom</span>
             {state.render.colorMode === "phase-real" && <span><span className="text-orange-400">■ ψ &gt; 0</span> <span className="text-blue-400">■ ψ &lt; 0</span> — sign of the real wavefunction (not density)</span>}
             {state.render.colorMode === "phase-complex" && <span>hue = arg ψ ∈ (−π, π] — complex phase e<sup>imφ</sup>; brightness ∝ log|ψ|²</span>}
-            {state.render.colorMode === "density" && <span>colour/brightness ∝ log-relative |ψ|² (black→violet→red→yellow→white)</span>}
+            {state.render.colorMode === "density" && <span>colour/brightness maps log-relative density (black→violet→red→yellow→white)</span>}
             {state.mode === "atom" && !useHF && <span>independent-electron density ρ = Σ Nᵢ|Rᵢ|²/(4π) (configuration-average, Unsöld). Brightness uses a <b>shared</b> cross-subshell normalisation; point count ∝ occupancy. Not a correlated many-electron density.</span>}
             {state.mode === "atom" && useHF && <span className="text-sky-300">imported PySCF {hfDataset?.method}/{hfDataset?.basis} spherically averaged HF density (basis-set-limited, non-relativistic). Not experimental.</span>}
             {state.mode === "atom" && electrons !== null && <span>∫ρ dV = {electrons.toFixed(3)} e (occupancy/tabulated check)</span>}
@@ -262,36 +282,23 @@ export default function App() {
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {tab === "radial" && (
-              <Panel title="Radial probability distribution">
-                <RadialPlot n={state.n} l={state.l} zeff={zeffActive} model={state.model} />
+              <Panel title={state.mode === "atom" ? "Total radial electron distribution" : "Radial probability distribution"}>
+                {state.mode === "atom" ? <AtomRadialPlot element={element} model={state.model} hf={useHF ? hfDataset : null}/> : <RadialPlot n={state.n} l={state.l} zeff={zeffActive} model={state.model} />}
               </Panel>
             )}
             {tab === "energy" && (
               <Panel title="Subshell level diagram">
-                <EnergyDiagram element={element} model={state.model} activeLabel={sub.label} onPick={(n, l) => dispatch({ type: "selectSubshell", n, l })} />
+                {useHF ? <p className="p-2 text-xs">Total electronic energy: {hfDataset.energy_hartree.toFixed(8)} Ha ({hfDataset.method}). This dataset supplies no orbital eigenvalues.</p> : <EnergyDiagram element={element} model={state.model} activeLabel={sub.label} onPick={(n, l) => dispatch({ type: "selectSubshell", n, l })} />}
               </Panel>
             )}
             {tab === "inspector" && (
               <Panel title="Scientific inspector">
-                <Inspector element={element} model={state.model} sub={sub} m={state.m} basis={state.basis} providerSelection={providerSelection} hfDataset={hfDataset} electrons={electrons} />
+                <Inspector mode={state.mode} useHF={useHF} element={element} model={state.model} sub={sub} m={state.m} basis={state.basis} providerSelection={providerSelection} hfDataset={hfDataset} electrons={electrons} />
               </Panel>
             )}
           </div>
         </aside>
       </div>
-    </div>
-  );
-}
-
-function ScaleBar({ extentPm }: { extentPm: number }) {
-  // nice round length ≈ 1/4 of extent
-  const raw = extentPm / 4;
-  const pow = Math.pow(10, Math.floor(Math.log10(raw)));
-  const nice = [1, 2, 5, 10].map((k) => k * pow).reduce((a, b) => (Math.abs(b - raw) < Math.abs(a - raw) ? b : a));
-  return (
-    <div className="flex items-center gap-2">
-      <div className="h-1 border-x border-b border-zinc-400" style={{ width: `${(nice / extentPm) * 120}px` }} />
-      <span className="font-mono">{nice >= 1000 ? `${nice / 1000} nm` : `${nice} pm`} · view extent ≈ {extentPm.toFixed(0)} pm ({(extentPm / BOHR_PM).toFixed(1)} a0)</span>
     </div>
   );
 }

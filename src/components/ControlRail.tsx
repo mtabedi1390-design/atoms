@@ -24,6 +24,7 @@ const M_LABELS_REAL: Record<number, string[]> = {
 };
 
 export function ControlRail({ state, element: e, dispatch, extentPm, layerColors, onResetCamera }: Props) {
+  const hf = state.mode === "atom" && state.densitySource === "hf";
   const r = state.render;
   const maxN = Math.max(7, ...e.subshells.map((s) => s.n));
   const nOptions = Array.from({ length: maxN }, (_, i) => i + 1);
@@ -43,19 +44,19 @@ export function ControlRail({ state, element: e, dispatch, extentPm, layerColors
             { v: "atom", label: "Full-atom density Σnᵢ|ψᵢ|²" },
           ]}
         />
-        <div className="mt-2">
+        {!hf && <div className="mt-2">
           <Seg
             value={state.model}
             onChange={(model) => dispatch({ type: "set", patch: { model: model as ModelId } })}
             options={[
-              { v: "hydrogenic-exact", label: e.Z === 1 ? "A · exact H" : `A · exact ${e.symbol}${e.Z - 1}+ ion`, title: MODELS["hydrogenic-exact"].appliesTo },
-              { v: "slater-screened-hydrogenic", label: "B · Slater-screened", disabled: e.Z === 1, title: MODELS["slater-screened-hydrogenic"].appliesTo },
+              { v: "hydrogenic-exact", disabled: state.mode === "atom" && e.Z > 1, label: e.Z === 1 ? "A · exact H" : `A · exact ${e.symbol}${e.Z - 1}+ ion`, title: MODELS["hydrogenic-exact"].appliesTo },
+              { v: "slater-screened-hydrogenic", label: "B · Slater-screened", disabled: hf || e.Z === 1, title: MODELS["slater-screened-hydrogenic"].appliesTo },
             ]}
           />
-        </div>
+        </div>}
       </Panel>
 
-      <Panel title="Full-atom density source">
+      {state.mode === "atom" && <Panel title="Full-atom density source">
         <Seg
           value={state.densitySource}
           onChange={(densitySource) => dispatch({ type: "set", patch: { densitySource } })}
@@ -66,17 +67,18 @@ export function ControlRail({ state, element: e, dispatch, extentPm, layerColors
         />
         <p className="mt-1 text-[10px] leading-snug text-zinc-500">
           {hfDatasetFor(e.Z)
-            ? `Bundled ${hfDatasetFor(e.Z)!.method}/${hfDatasetFor(e.Z)!.basis}: ${hfDatasetFor(e.Z)!.term}, SCF converged in ${hfDatasetFor(e.Z)!.scf.cycles} cycles. Basis-set-limited HF (ΔE = ${hfDatasetFor(e.Z)!.basisError_hartree.toExponential(1)} Ha vs numerical HF limit); no correlation, non-relativistic.`
-            : `Offline HF data exists only for H, He, C, N, O, Ne (Z=${HF_ATOMS.join(", ")}). Other elements use the visible Slater estimate; no heavy-atom MCDHF was run (GRASP not installed).`}
+            ? `Bundled ${hfDatasetFor(e.Z)!.method}/${hfDatasetFor(e.Z)!.basis}: ${hfDatasetFor(e.Z)!.term}, SCF converged in ${hfDatasetFor(e.Z)!.scf.cycles} cycles. Basis-set-limited HF (ΔE = ${hfDatasetFor(e.Z)!.basisError_hartree.toExponential(1)} Ha vs published HF reference); no correlation, non-relativistic.`
+            : `Offline HF data exists only for H through Ar (Z=${HF_ATOMS.join(", ")}). Other elements use the visible Slater estimate; no heavy-atom MCDHF was run (GRASP not installed).`}
         </p>
-      </Panel>
+      </Panel>}
 
-      <Panel title="Orbital / subshell">
+      {!hf && <Panel title="Orbital / subshell">
+        {state.mode === "single" && <>
         <div className="mb-2 grid grid-cols-[auto_1fr] gap-x-2 gap-y-1 text-xs">
           <span className="self-center text-zinc-500">n</span>
           <div className="flex flex-wrap gap-1">
             {nOptions.map((n) => (
-              <button key={n} data-testid={`n-${n}`} aria-label={`principal quantum number ${n}`} onClick={() => dispatch({ type: "selectSubshell", n, l: Math.min(state.l, n - 1) })} className={`h-6 w-6 rounded-sm border font-mono ${state.n === n ? "border-amber-400 bg-amber-400 text-black" : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"}`}>{n}</button>
+              <button key={n} disabled={!state.allowUnoccupied && !e.subshells.some(s=>s.n===n)} data-testid={`n-${n}`} aria-label={`principal quantum number ${n}`} onClick={() => dispatch({ type: "selectSubshell", n, l: Math.min(state.l, n - 1) })} className={`h-6 w-6 rounded-sm border font-mono ${state.n === n ? "border-amber-400 bg-amber-400 text-black" : "border-zinc-700 text-zinc-300 hover:bg-zinc-800"}`}>{n}</button>
             ))}
           </div>
           <span className="self-center text-zinc-500">l</span>
@@ -108,9 +110,9 @@ export function ControlRail({ state, element: e, dispatch, extentPm, layerColors
             { v: "complex", label: "Complex Y_l^m" },
           ]}
         />
-        <Toggle label="Allow unoccupied (n,l) in single mode" checked={state.allowUnoccupied} onChange={(v) => dispatch({ type: "set", patch: { allowUnoccupied: v } })} />
+        <Toggle label="Allow unoccupied (n,l) in single mode" checked={state.allowUnoccupied} onChange={(v) => dispatch({ type: "set", patch: { allowUnoccupied: v } })} /></>}
         <div className="mt-2">
-          <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Occupied subshells {state.mode === "atom" ? "(visibility · opacity)" : "(click to select)"}</div>
+          <div className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Neutral occupied subshells {state.mode === "atom" ? "(visibility · opacity)" : "(click to select)"}</div>
           <div className="grid grid-cols-1 gap-0.5">
             {e.subshells.map((s) => {
               const L = state.layers[s.label] ?? { visible: true, opacity: 1 };
@@ -131,7 +133,7 @@ export function ControlRail({ state, element: e, dispatch, extentPm, layerColors
             })}
           </div>
         </div>
-      </Panel>
+      </Panel>}
 
       <Panel title="Sampling">
         <Slider label="Samples" value={state.count} min={25000} max={300000} step={5000} onChange={(count) => dispatch({ type: "set", patch: { count, adaptiveQuality: false } })} format={(v) => v.toLocaleString()} />
@@ -147,7 +149,7 @@ export function ControlRail({ state, element: e, dispatch, extentPm, layerColors
             { v: "density", label: "|ψ|²" },
             { v: "phase-real", label: "sign ψ", disabled: state.basis !== "real" || state.mode === "atom", title: "Real basis only: orange = ψ>0, blue = ψ<0" },
             { v: "phase-complex", label: "arg ψ", disabled: state.basis !== "complex" || state.mode === "atom", title: "Complex basis only: hue = phase angle" },
-            { v: "layer", label: "subshell", disabled: state.mode !== "atom" },
+            { v: "layer", label: "subshell", disabled: hf || state.mode !== "atom" },
           ]}
         />
         <Slider label="Point size" value={r.pointSize} min={0.5} max={6} step={0.1} onChange={(pointSize) => dispatch({ type: "render", patch: { pointSize } })} />
@@ -155,7 +157,7 @@ export function ControlRail({ state, element: e, dispatch, extentPm, layerColors
         <Slider label="Density cutoff (log-rel.)" value={r.cutoff} min={0} max={0.95} step={0.01} onChange={(cutoff) => dispatch({ type: "render", patch: { cutoff } })} />
         <Toggle label="Axes & grid" checked={r.showAxes} onChange={(showAxes) => dispatch({ type: "render", patch: { showAxes } })} />
         <Toggle label="Nucleus marker (not to scale)" checked={r.showNucleus} onChange={(showNucleus) => dispatch({ type: "render", patch: { showNucleus } })} />
-        <Toggle label="Probability current j (complex, m≠0)" checked={state.showCurrent} onChange={(showCurrent) => dispatch({ type: "set", patch: { showCurrent } })} />
+        {state.mode === "single" && <Toggle label="Probability current j (complex, m≠0)" checked={state.showCurrent} onChange={(showCurrent) => dispatch({ type: "set", patch: { showCurrent } })} />}
         <button onClick={onResetCamera} className="mt-1 w-full rounded-sm border border-zinc-700 py-1 text-xs text-zinc-300 hover:bg-zinc-800">Reset camera</button>
       </Panel>
 

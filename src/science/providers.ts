@@ -6,12 +6,8 @@
  * accuracy-dependent; a provider that is not runnable reports `available: false`
  * with the exact blocker and is never silently substituted.
  */
-import H from "@/data/hf/H.json";
-import He from "@/data/hf/He.json";
-import C from "@/data/hf/C.json";
-import N from "@/data/hf/N.json";
-import O from "@/data/hf/O.json";
-import Ne from "@/data/hf/Ne.json";
+import { MODELS } from "@/physics/models";
+import { elementByZ, electronCount } from "@/data/elements";
 
 export type Observable = "electron-density" | "total-energy" | "ionization-energy" | "fine-structure";
 export type Accuracy = "interactive" | "quantitative" | "high";
@@ -44,6 +40,7 @@ export interface HFDataset {
   spin2S: number;
   charge: number;
   atom: { Z: number; symbol: string; configuration: string };
+  basisSensitivity: { comparisonBasis: string; energyHartree: number; radialDensityL1Electrons: number };
   energy_hartree: number;
   energy_eV: number;
   reference: { property: string; value_hartree: number; source: string; note: string };
@@ -71,6 +68,7 @@ export interface ComputeRequest {
 }
 
 export interface ProviderResult {
+  energyHartree?: number;
   providerId: string;
   available: boolean;
   /** Only present when the provider actually produced a dataset. */
@@ -88,7 +86,7 @@ export interface EngineProvider {
   compute(request: ComputeRequest): ProviderResult | null;
 }
 
-const RAW: unknown[] = [H, He, C, N, O, Ne];
+const RAW: unknown[] = Object.values(import.meta.glob("../data/hf/*.json", { eager: true, import: "default" }));
 const BY_Z = new Map<number, HFDataset>();
 
 /** Schema + integrity validation of an exported HF dataset (no silent coercion). */
@@ -102,13 +100,24 @@ export function validateHFDataset(raw: unknown): HFDataset {
     if (!(r[i] > 0) || !Number.isFinite(r[i]) || !Number.isFinite(rho[i]) || rho[i] < 0) throw new Error(`HF grid non-finite/negative at ${i}`);
     if (i > 0 && !(r[i] > r[i - 1])) throw new Error(`HF radial grid not strictly increasing at ${i}`);
   }
-  if (Math.abs(d.density.integratedElectrons - d.atom.Z) > d.density.electronCountTolerance)
-    throw new Error(`HF dataset ${d.atom.symbol} electron count ${d.density.integratedElectrons} ≠ Z`);
+  if (d.scf?.converged !== true || d.charge !== 0 || !Number.isInteger(d.atom?.Z) ||
+      elementByZ(d.atom.Z).symbol !== d.atom.symbol) throw new Error("Invalid neutral HF state or unconverged SCF");
+  const delta = d.energy_hartree - d.reference?.value_hartree;
+  if (!Number.isFinite(delta) || !Number.isFinite(d.basisError_hartree) ||
+      Math.abs(delta - d.basisError_hartree) > 1e-9 || delta < -2e-4 || delta >= 0.02 ||
+      !Number.isFinite(d.basisSensitivity?.radialDensityL1Electrons) || d.basisSensitivity.radialDensityL1Electrons < 0)
+    throw new Error(`Invalid HF reference comparison for ${d.atom.symbol}`);
+  const count = integrateDatasetElectrons(d);
+  const tolerance = d.density.electronCountTolerance;
+  if (!Number.isFinite(count) || !Number.isFinite(d.density.integratedElectrons) || !(tolerance > 0 && tolerance <= 0.002) ||
+      Math.abs(count - d.atom.Z) > tolerance || Math.abs(count - d.density.integratedElectrons) > 1e-8)
+    throw new Error(`HF electron-count mismatch for ${d.atom.symbol}: grid ${count}, stored ${d.density.integratedElectrons}, Z=${d.atom.Z}`);
   return d;
 }
 
 for (const raw of RAW) {
   const d = validateHFDataset(raw);
+  if (BY_Z.has(d.atom.Z)) throw new Error("Duplicate HF identity");
   BY_Z.set(d.atom.Z, d);
 }
 
@@ -145,18 +154,35 @@ const SLATER_META: EngineMetadata = {
   ],
 };
 
+/** Neutral H only. One-electron ions are an explicit separate single-orbital mode. */
+export const hydrogenProvider: EngineProvider = {
+  id: "hydrogenic-exact", label: "Neutral H 1s", availability: { available: true },
+  supports: req => req.Z === 1 && (req.observable === "electron-density" || req.observable === "total-energy"),
+  compute(req) {
+    if (!this.supports(req)) return null;
+    const m = MODELS["hydrogenic-exact"];
+    return { energyHartree: req.observable === "total-energy" ? -0.5 : undefined, providerId: this.id, available: true, metadata: { ...m, method: m.name, license: SLATER_META.license },
+      validation: { passed: true, checks: [{name: "one electron", passed: true, detail: "neutral H, normalized 1s"}] },
+      reason: "Analytic 1s density under the non-relativistic, point-nucleus Hamiltonian." };
+  },
+};
+
 export const slaterProvider: EngineProvider = {
   id: "browser-slater",
   label: "Slater-screened hydrogenic (browser)",
   availability: { available: true },
-  supports: (req) => req.observable === "electron-density" && (req.accuracy === "interactive" || !BY_Z.has(req.Z)),
-  compute: (req) => ({
-    providerId: "browser-slater",
-    available: true,
-    metadata: SLATER_META,
-    validation: { passed: true, checks: [{ name: "QN/data validation", passed: true, detail: "browser tests cover 118-element integrity" }] },
-    reason: `Interactive density for Z=${req.Z}: configuration-average independent-electron estimate.`,
-  }),
+  supports: (req) => Number.isInteger(req.Z) && req.Z > 1 && req.Z <= 118 && req.observable === "electron-density" && (req.accuracy === "interactive" || !BY_Z.has(req.Z)),
+  compute(req) {
+    if (!this.supports(req)) return null;
+    const valid = electronCount(elementByZ(req.Z)) === req.Z;
+    return {
+      providerId: "browser-slater",
+      available: true,
+      metadata: SLATER_META,
+      validation: { passed: valid, checks: [{ name: "neutral count", passed: valid, detail: `occupied subshells sum to Z=${req.Z}` }] },
+      reason: `Interactive density for Z=${req.Z}: configuration-average independent-electron estimate.`,
+    };
+  },
 };
 
 export const pyscfHFProvider: EngineProvider = {
@@ -164,18 +190,20 @@ export const pyscfHFProvider: EngineProvider = {
   label: "PySCF RHF/ROHF radial density (offline, bundled)",
   availability: { available: BY_Z.size > 0 },
   supports: (req) => BY_Z.has(req.Z) && (req.observable === "electron-density" || req.observable === "total-energy"),
-  compute: (req) => {
+  compute(req) {
+    if (!this.supports(req)) return null;
     const d = hfDatasetFor(req.Z);
     if (!d) return null;
     const electrons = integrateDatasetElectrons(d);
     const checks = [
       { name: "schema", passed: d.schema === "atoms.hf-radial.v1", detail: d.schema },
       { name: "SCF converged", passed: d.scf.converged, detail: `cycles=${d.scf.cycles}, tol=${d.scf.convergenceTol}` },
-      { name: "electron count", passed: Math.abs(electrons - d.atom.Z) <= 5e-3, detail: `∫4πr²ρdr = ${electrons.toFixed(5)} e (Z=${d.atom.Z})` },
-      { name: "basis error vs HF limit", passed: Math.abs(d.basisError_hartree) < 0.05, detail: `ΔE = ${d.basisError_hartree.toFixed(5)} Ha with ${d.basis}` },
+      { name: "electron count", passed: Math.abs(electrons - d.atom.Z) <= d.density.electronCountTolerance, detail: `∫4πr²ρdr = ${electrons.toFixed(5)} e (Z=${d.atom.Z})` },
+      { name: "energy difference vs HF reference", passed: d.basisError_hartree >= -2e-4 && d.basisError_hartree < 0.02, detail: `ΔE = ${d.basisError_hartree.toFixed(5)} Ha with ${d.basis}` },
       { name: "monotonic radial grid", passed: d.density.rBohr.every((v, i, a) => i === 0 || v > a[i - 1]), detail: `${d.density.rBohr.length} points` },
     ];
     return {
+      energyHartree: d.energy_hartree,
       providerId: "pyscf-hf",
       available: true,
       dataset: d,
@@ -194,7 +222,7 @@ export const pyscfHFProvider: EngineProvider = {
         limitations: d.knownLimitations,
       },
       validation: { passed: checks.every((c) => c.passed), checks },
-      reason: `Bundled ${d.method}/${d.basis} spherical density for ${d.atom.symbol}; basis-set-limited HF (ΔE = ${d.basisError_hartree.toFixed(5)} Ha vs numerical HF limit).`,
+      reason: `Bundled ${d.method}/${d.basis} spherical density for ${d.atom.symbol}; basis-set-limited HF (ΔE = ${d.basisError_hartree.toFixed(5)} Ha vs published HF reference).`,
     };
   },
 };
@@ -204,13 +232,13 @@ export const graspProvider: EngineProvider = {
   label: "GRASP2018 MCDHF / RCI (offline)",
   availability: {
     available: false,
-    blocker: "GRASP2018 is not installed in this environment and its source is not bundled. MCDHF/RCI, Breit and QED corrections were therefore NOT run. Next step: install GRASP2018 on a Linux host, prepare a Cs-like case with a Fermi nucleus, and export radial orbitals in the atoms.hf-radial.v1 format.",
+    blocker: "GRASP2018 is not installed in this environment and its source is not bundled. MCDHF/RCI, Breit and QED corrections were therefore NOT run. Next step: install GRASP2018 on a Linux host, prepare a Cs-like case with a Fermi nucleus, and validate spinor data in a dedicated relativistic schema.",
   },
   supports: () => false,
   compute: () => null,
 };
 
-export const PROVIDERS: readonly EngineProvider[] = [pyscfHFProvider, slaterProvider, graspProvider];
+export const PROVIDERS: readonly EngineProvider[] = [hydrogenProvider, pyscfHFProvider, slaterProvider, graspProvider];
 
 export interface Selection {
   provider: EngineProvider;
@@ -222,7 +250,7 @@ export interface Selection {
 export function selectProvider(request: ComputeRequest): Selection {
   const avoided: { id: string; reason: string }[] = [];
   const order: EngineProvider[] =
-    request.accuracy === "interactive" ? [slaterProvider, pyscfHFProvider, graspProvider] : [pyscfHFProvider, graspProvider, slaterProvider];
+    request.accuracy === "interactive" ? [hydrogenProvider, slaterProvider, pyscfHFProvider, graspProvider] : [hydrogenProvider, pyscfHFProvider, graspProvider, slaterProvider];
   for (const p of order) {
     if (!p.availability.available) {
       avoided.push({ id: p.id, reason: p.availability.blocker ?? "unavailable" });

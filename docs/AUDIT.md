@@ -1,4 +1,8 @@
-# Audit — upstream `kavan010/Atoms` and the browser baseline
+# v0.5.0 release audit
+
+Base: `5c93dae70af04e0c08c298e544f00095ccdc8560`, clean and identical to fetched `origin/main`. The 118 cells already existed. The main deficiencies were not missing cells: hand-maintained atomic fields, six density-only datasets, a full-atom radial panel that still plotted a single orbital, ion charges leaking into neutral sums, and phase colors surviving a mode switch. Disabling a button did not clear its previously selected shader mode. Reusing unchanged layer requests also erased the stored electron-count totals when opacity changed. The current release addresses these in the data pipeline, state reducer, panel selection and sampling lifecycle. See [verification](VERIFICATION.md) for baseline vs final checks and [matrix](ACCURACY_MATRIX.md) for remaining gaps.
+
+## Historical upstream audit (pre-v0.5)
 
 Upstream inspected at commit `5c4283a` (cloned during the first session, `/tmp/Atoms`).
 Confirmed defects were fixed in this tree; suspected risks are listed separately.

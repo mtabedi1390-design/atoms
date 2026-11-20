@@ -62,13 +62,13 @@ void main() {
   vec2 d = gl_PointCoord - 0.5;
   float r2 = dot(d, d);
   if (r2 > 0.25) discard;
-  float soft = smoothstep(0.25, 0.05, r2);
+  float soft = 1.0 - smoothstep(0.05, 0.25, r2);
   vec3 col;
   if (uColorMode == 0) col = heat(0.15 + 0.85 * vRel);
   else if (uColorMode == 1) col = vPhase > 0.0 ? vec3(0.95, 0.45, 0.10) : vec3(0.15, 0.55, 1.0); // + orange, − blue
   else if (uColorMode == 2) col = hsv2rgb(vec3((vPhase + 3.14159265) / 6.2831853, 0.85, 1.0));
   else col = uLayerColor;
   float a = soft * uOpacity * (0.25 + 0.75 * vRel) * uBrightness;
-  gl_FragColor = vec4(col * a, a);
+  gl_FragColor = vec4(col, a);
 }
 `;

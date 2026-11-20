@@ -1,5 +1,6 @@
 import type { ElementRecord, Subshell } from "@/data/elements";
 import { elementByZ } from "@/data/elements";
+import { hfDatasetFor } from "@/science/providers";
 import type { AngularBasis } from "@/physics/hydrogenic";
 import { subshellLabel } from "@/physics/hydrogenic";
 import type { ModelId } from "@/physics/models";
@@ -87,7 +88,7 @@ function initialCommon(Z: number, n: number, l: number, count: number, mode: "si
     allowUnoccupied: true,
     basis: "real",
     model: Z === 1 ? "hydrogenic-exact" : "slater-screened-hydrogenic",
-    densitySource: "model",
+    densitySource: Z > 1 && hfDatasetFor(Z) ? "hf" : "model",
     count,
     seed: 1337,
     showCurrent: false,
@@ -109,14 +110,34 @@ export function reducer(state: AppState, a: Action): AppState {
       const v = valenceSubshell(e);
       // H → exact model. Leaving H → default to Slater estimate (the exact model then means a one-electron ion).
       const model: ModelId = a.Z === 1 ? "hydrogenic-exact" : state.Z === 1 ? "slater-screened-hydrogenic" : state.model;
-      return { ...state, Z: a.Z, n: v.n, l: v.l, m: 0, layers: defaultLayers(e), model };
+      return { ...state, render: state.render.colorMode === "layer" && hfDatasetFor(a.Z) ? {...state.render, colorMode:"density"} : state.render, Z: a.Z, n: v.n, l: v.l, m: 0, layers: defaultLayers(e), model, densitySource: a.Z > 1 && hfDatasetFor(a.Z) ? "hf" : "model" };
     }
-    case "selectSubshell":
-      return { ...state, n: a.n, l: a.l, m: Math.max(-a.l, Math.min(a.l, state.m)) };
+    case "selectSubshell": {
+      const shells = elementByZ(state.Z).subshells.filter(s => s.n === a.n);
+      const restrict = state.mode === "atom" || !state.allowUnoccupied;
+      if (restrict && !shells.length) return state;
+      const l = restrict && !shells.some(s => s.l === a.l) ? shells[0].l : a.l;
+      return { ...state, n: a.n, l, m: Math.max(-l, Math.min(l, state.m)) };
+    }
     case "setM":
       return { ...state, m: Math.max(-state.l, Math.min(state.l, a.m)) };
-    case "set":
-      return { ...state, ...a.patch };
+    case "set": {
+      const next = { ...state, ...a.patch };
+      if (next.mode === "atom") {
+        next.model = next.Z === 1 ? "hydrogenic-exact" : "slater-screened-hydrogenic";
+        next.showCurrent = false;
+      }
+      if ((next.mode === "atom" || !next.allowUnoccupied) && !activeSubshell(next, elementByZ(next.Z)).occupancy) {
+        const v = valenceSubshell(elementByZ(next.Z));
+        next.n=v.n; next.l=v.l; next.m=0;
+      }
+      const color = next.render.colorMode;
+      if ((color.startsWith("phase") && (next.mode === "atom" || color !== `phase-${next.basis}`)) ||
+          (color === "layer" && (next.mode !== "atom" || next.densitySource === "hf"))) {
+        next.render = { ...next.render, colorMode: "density" };
+      }
+      return next;
+    }
     case "render":
       return { ...state, render: { ...state.render, ...a.patch } };
     case "layer":

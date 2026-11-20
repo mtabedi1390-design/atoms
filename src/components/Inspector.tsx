@@ -1,9 +1,10 @@
 import type { ElementRecord, Subshell } from "@/data/elements";
+import { coverage } from "@/science/coverage";
 import { CONSTANTS } from "@/physics/constants";
 import { MODELS, slaterZeff, type ModelId } from "@/physics/models";
 import { Badge, Row } from "./ui";
 import type { HFDataset, Selection } from "@/science/providers";
-import { PROVIDERS, graspProvider, selectProvider } from "@/science/providers";
+import { PROVIDERS, graspProvider } from "@/science/providers";
 
 interface Props {
   element: ElementRecord;
@@ -13,26 +14,31 @@ interface Props {
   basis: "real" | "complex";
   providerSelection: Selection;
   hfDataset: HFDataset | null;
+  mode: "single" | "atom";
+  useHF: boolean;
   electrons: number | null;
 }
 
-export function Inspector({ element: e, model, sub, m, basis, providerSelection, hfDataset, electrons }: Props) {
+export function Inspector({ element: e, model, sub, m, basis, providerSelection, hfDataset, mode, useHF, electrons }: Props) {
   const M = MODELS[model];
   const sl = model === "slater-screened-hydrogenic" ? slaterZeff(e, sub) : null;
   const ie = e.ionizationEnergy_eV;
   return (
     <div className="flex flex-col gap-3 text-xs">
+      <p>Preferred neutral total density: {coverage(e).totalDensity} ({coverage(e).evidence}).</p>
+      <p>Displayed: {useHF ? "pyscf-hf · computed-basis-limited" : model === "hydrogenic-exact" ? "hydrogenic-exact · analytic within stated Hamiltonian" : "browser-slater · qualitative approximation"}</p>
       <div>
-        <h3 className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Element</h3>
+        <h3 className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Neutral element</h3>
         <Row label="Name / symbol / Z">{e.name} · {e.symbol} · {e.Z}</Row>
-        <Row label={e.massKind === "standard atomic weight" ? "Std. atomic weight" : "Mass number (longest-lived)"} hint={e.mass.source}>
-          {e.massKind === "standard atomic weight" ? e.mass.value.toFixed(3) : `[${e.mass.value}]`} u <Badge kind={e.mass.evidence}>{e.mass.evidence}</Badge>
+        <Row label={e.massKind === "standard atomic weight" ? "Std. atomic weight" : "Representative mass number"} hint={e.mass.source}>
+          {e.massKind === "standard atomic weight" ? e.mass.value : `[${e.mass.value}]`} <Badge kind={e.mass.evidence}>{e.mass.evidence}</Badge>
         </Row>
         <Row label="Category / block">{e.category} · {e.block}</Row>
         <Row label="Group / period">{e.group ?? "—"} / {e.period}</Row>
         <Row label="Configuration" hint={e.configuration.source}>
           <span className="text-zinc-100">{e.configuration.value}</span> <Badge kind={e.configuration.evidence}>{e.configuration.evidence}</Badge>
         </Row>
+        <Row label="Neutral ground level (term / J)">{e.groundLevel ?? "unavailable"} {e.Z >= 104 && e.groundLevel ? "(predicted)" : ""}</Row>
         {e.configuration.note && <p className="text-[10px] text-amber-300/80">{e.configuration.note}</p>}
         <Row label="1st ionisation energy" hint={ie.source + (ie.note ? " — " + ie.note : "")}>
           {ie.value === null ? "unavailable" : `${ie.value.toFixed(3)} eV`} <Badge kind={ie.evidence}>{ie.evidence}</Badge>
@@ -42,11 +48,13 @@ export function Inspector({ element: e, model, sub, m, basis, providerSelection,
         </Row>
       </div>
 
+      {!useHF && <>
       <div>
-        <h3 className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Active state</h3>
-        <Row label="Subshell / occupancy">{sub.label} · {sub.occupancy} e⁻{sub.occupancy === 0 ? " (unoccupied)" : ""}</Row>
+        <h3 className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Orbital model state</h3>
+        {mode === "atom" ? <p>Configuration average: equally weighted magnetic substates; no single m or orbital phase.</p> : <>
+        <Row label="Orbital / neutral reference occupancy">{sub.label} · {sub.occupancy} e⁻{sub.occupancy === 0 ? " (unoccupied)" : ""}</Row>
         <Row label="(n, l, m)">({sub.n}, {sub.l}, {m})</Row>
-        <Row label="Angular basis">{basis === "real" ? `real tesseral (m${m > 0 ? "₊" : m < 0 ? "₋" : "₀"})` : "complex Y_l^m"}</Row>
+        <Row label="Angular basis">{basis === "real" ? `real tesseral (m${m > 0 ? "₊" : m < 0 ? "₋" : "₀"})` : "complex Y_l^m"}</Row></>}
         {sl && (
           <>
             <Row label="Slater screening S">{sl.screening.toFixed(2)}</Row>
@@ -67,7 +75,7 @@ export function Inspector({ element: e, model, sub, m, basis, providerSelection,
         <Row label="Engine / version">TypeScript core {M.version}</Row>
         <Row label="Constants">{CONSTANTS.name}</Row>
         <Row label="Numerics">trapezoid CDF 8192×2048 pts, Lanczos lnΓ, 3-term recurrences</Row>
-        <Row label="Validation">37 vitest cases (analytic, KS α=0.001, data)</Row>
+        <Row label="Validation">Analytic moments, KS sampling and native parity tests</Row>
       </div>
 
       <div>
@@ -80,9 +88,10 @@ export function Inspector({ element: e, model, sub, m, basis, providerSelection,
         </ul>
       </div>
 
+      </>}
       <div>
         <h3 className="mb-1 text-[10px] uppercase tracking-wider text-zinc-500">Method selection (observable-dependent)</h3>
-        <Row label="electron density @ quantitative">
+        <Row label="Neutral density recommendation or selected HF">
           <span className="text-right">{providerSelection.result ? providerSelection.result.metadata.method : "no validated provider"}</span>
         </Row>
         <Row label="engine / version">
@@ -93,9 +102,10 @@ export function Inspector({ element: e, model, sub, m, basis, providerSelection,
             <Row label="basis">{providerSelection.result.metadata.basis}</Row>
             <Row label="convergence">{providerSelection.result.metadata.convergence}</Row>
             <Row label="energy (HF)">{(providerSelection.result.dataset.energy_hartree).toFixed(8)} Ha · {providerSelection.result.dataset.energy_eV.toFixed(3)} eV</Row>
-            <Row label="HF-limit reference">{providerSelection.result.dataset.reference.value_hartree.toFixed(8)} Ha</Row>
-            <Row label="basis error">ΔE = {providerSelection.result.dataset.basisError_hartree.toExponential(3)} Ha</Row>
-            <Row label="∫ρ dV (this scene)">{electrons === null ? "not sampled yet" : `${electrons.toFixed(4)} e / ${e.Z} e expected`}</Row>
+            <Row label="Published HF reference">{providerSelection.result.dataset.reference.value_hartree.toFixed(8)} Ha</Row>
+            <Row label="Density basis sensitivity">∫|Δρ| dV = {providerSelection.result.dataset.basisSensitivity.radialDensityL1Electrons.toPrecision(3)} e vs aug-cc-pVDZ</Row>
+            <Row label="HF energy difference">ΔE = {providerSelection.result.dataset.basisError_hartree.toExponential(3)} Ha</Row>
+            {useHF && <Row label="∫ρ dV (this scene)">{electrons === null ? "not sampled yet" : `${electrons.toFixed(4)} e / ${e.Z} e expected`}</Row>}
           </>
         )}
         <div className="mt-1 space-y-0.5">
@@ -107,14 +117,14 @@ export function Inspector({ element: e, model, sub, m, basis, providerSelection,
           ))}
         </div>
         {providerSelection.result?.metadata.limitations.slice(0, 4).map((l) => <p key={l} className="mt-0.5 text-[10px] text-zinc-500">• {l}</p>)}
-        {e.Z > 10 && (
+        {!hfDataset && (
           <p className="mt-1 text-[10px] text-amber-300/80">
             No HF dataset for Z={e.Z}: only the Slater estimate is available. {graspProvider.availability.blocker}
           </p>
         )}
         <p className="mt-1 text-[10px] text-zinc-600">
           Providers registered: {PROVIDERS.map((p) => `${p.id}${p.availability.available ? "" : " (unavailable)"}`).join(", ")}. Selection for total energy / fine structure is separate from density:
-          {" "}{selectProvider({ Z: e.Z, observable: "total-energy", accuracy: "quantitative" }).result ? "HF total energy available" : "not available for this element"}.
+          {" "}{`total energy: ${coverage(e).totalEnergy ?? "unavailable"}; fine structure: unavailable`}.
         </p>
         {hfDataset && <p className="mt-1 text-[10px] text-zinc-600">Bundled dataset: {hfDataset.schema}, generated {hfDataset.generated}, command <code>{hfDataset.command}</code>.</p>}
       </div>

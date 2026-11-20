@@ -1,40 +1,23 @@
-# Models, engines and selection policy
+# Models and numerical conventions
 
-## Implemented and runnable
+## One-electron Coulomb model (`hydrogenic-exact`)
 
-| Model | Scope | Hamiltonian / method | Correlation | Relativistic | Evidence |
-|---|---|---|---|---|---|
-| A `hydrogenic-exact` | H, one-electron ions; orbital basis | Schrödinger, Coulomb point nucleus, M→∞, CODATA 2018 | none (one electron) | none | exact analytic solution; validated numerically |
-| B `slater-screened-hydrogenic` | all Z, qualitative shapes | independent electrons, Z_eff = Z−S (Slater 1930) with n* table 1,2,3,3.7,4.0,4.2,4.3 (≥7 extrapolated and labelled) | none | none | empirical estimate, labelled as such |
-| PySCF HF (`pyscf-hf`) | H, He, C, N, O, Ne density & total energy | RHF/ROHF, aug-cc-pVTZ, point nucleus | none (HF) | none | computed offline, real output, electron count & energy checks |
+In atomic units, $H=-\nabla^2/2-Z/r$, $\psi=R_{nl}Y_l^m$, $E_n=-Z^2/(2n^2)$ Ha. Assume a point charge, infinite nuclear mass and no relativistic, hyperfine or radiative corrections. Orbitals normalize with $\int r^2 |R|^2 dr=1$ and $\int |Y|^2 d\Omega=1$. The associated Laguerre polynomial has $n-l-1$ positive radial nodes. Complex harmonics include the Condon–Shortley phase; their $e^{im\phi}$ does **not** produce azimuthal nodal planes. Real tesseral combinations have $|m|$ such planes. Both have $l-|m|$ polar zeros away from the axis. For $m\ne0$ the poles themselves are zeros. A real stationary state has zero current; a complex state has azimuthal $j_\phi=m|\psi|^2/(r\sin\theta)$ in atomic units. Current glyphs show direction, not trajectories.
 
-## Registered but unavailable
+## Independent-electron neutral estimate (`browser-slater`)
 
-| Provider | Blocker |
-|---|---|
-| GRASP2018 MCDHF/RCI | not installed, source not bundled. No Breit/QED/MCDHF results were produced. Next: install GRASP on Linux, Cs-like test with Fermi nucleus, export radial orbitals in `atoms.hf-radial.v1`. |
-| DFT/MCSCF/CI, X2C, four-component Dirac | no validated offline workflow in this environment; not claimed. |
+Compute screening from the actual occupied configuration ([Slater 1930](https://doi.org/10.1103/PhysRev.36.57)). Same-group screening is 0.35 per other electron (0.30 for 1s). For ns/np use 0.85 for n−1, 1 for deeper shells. For nd/nf, preceding groups screen fully. Implementation floors $Z_{eff}=Z-S$ at 0.3 for extrapolated cases. Use the **integer** n radial Coulomb shape with this charge: $\langle r\rangle = [3n^2-l(l+1)]a_0/(2Z_{eff})$. Only the empirical energy surrogate uses effective $n^*=1,2,3,3.7,4,4.2,4.3$ (last value extrapolated). It is not an eigenvalue of that radial model. Unoccupied orbitals are educational extrapolations.
 
-## Observable-dependent selection (`src/science/providers.ts`)
+With occupancy $N_{nl}$, the addition theorem gives the spherical configuration average $\rho_{nl}=N_{nl}|R_{nl}|^2/(4\pi)$. Sample $r$ from $r^2|R|^2$, and uniform solid angle directly. Sum the components for total density. This is not a spin-coupled calculation; an open p shell does not imply that every electron occupies $m=0$. Subshell point counts scale with occupancy (rounded to integers); brightness uses a common sampled peak. Hiding a layer changes the picture, not the atom or its normalization.
 
-* electron density, interactive → browser Slater estimate (fast, all Z).
-* electron density, quantitative/high → PySCF HF if a bundled dataset exists for that Z; otherwise
-  the Slater estimate is returned **with method metadata**, never relabelled as HF.
-* total energy → PySCF HF where available; otherwise `null` (unavailable), not estimated.
-* fine structure / transition rates → `null`; no provider (GRASP unavailable).
-* Every `ProviderResult` carries engine/version/licence, method, basis, SCF convergence, validation
-  checks and limitations. The inspector renders them.
+## Offline RHF/ROHF (`pyscf-hf`)
 
-## Energy quantities — kept distinct
+[PySCF](https://pyscf.org/user/scf.html) 2.15.1, aug-cc-pVTZ, all-electron Coulomb Hamiltonian, isolated neutral H–Ar, fixed point nucleus, no correlation or relativity. Closed shells use RHF, open shells use ROHF with specified 2S. The listed term is the target configuration/term, **not** a projected eigenstate of J. From the spin-summed AO density matrix, evaluate $\rho=\sum_{ij}D_{ij}\chi_i\chi_j$ and average on the normalized 110-point Lebedev grid. Store electrons/a₀³ on 840 log-spaced radial points, initially 0.001–48 a₀. Reject non-convergence or an integral differing from Z by more than 0.002 e. The plotted radial distribution is $4\pi r^2\rho$, not $\rho$ itself; convert to e/pm by dividing by the number of pm in a₀.
 
-* exact hydrogenic `E_n = −13.605693 Z²/n² eV` (one electron);
-* surrogate `−13.605693 Z_eff²/n*² eV` (Slater estimate);
-* HF total electronic energy (PySCF, basis-limited, includes electron–electron repulsion);
-* experimental first ionization energy (NIST ASD).
-They are shown with distinct labels; only the first is an eigenvalue of the displayed Hamiltonian.
+The numerical energy check is separate from density validation. For H–Ne the comparison is with tabulated HF limits; for Na–Ar it is with published Koga et al. finite STO HF energies, **not** an exact limit. DZ/TZ sensitivity and independent radial profiles are reported in [HF validation](HF_VALIDATION.md). These checks do not establish accuracy for the exact correlated density. Gaussian orbitals do not have the exact Coulomb cusp. No signed radial functions, individual HF eigenvalues or spinor components are imported.
 
-## Relativistic importance
+## Selection and unavailable methods
 
-Relativistic effects are significant for Z ≳ 50 (s/p contraction, d/f expansion, spin–orbit).
-They are **not implemented**. The UI warns for every Z ≥ 50 and for every full-atom display. For
-Z ≥ 104 configurations are theoretical predictions and marked as such.
+Neutral H defaults to analytic. Full neutral He–Ar defaults to bundled HF, with an explicit option for model layers. K–Og defaults to the Slater estimate. Single-orbital views cannot use the HF table. Quantitative requests without a high-accuracy result disclose the qualitative fallback; unsupported total energies and fine structure remain unavailable. The [matrix](ACCURACY_MATRIX.md) distinguishes orbital, total-density and energy evidence.
+
+GRASP2018, ATSP2K, DIRAC and FAC executables were not installed. A GRASP/MCDHF result would require validated spinor/configuration-state data, not an HF scalar-density file. We also inspected dftatom's radial Dirac LDA workflow (Čertík et al., [CPC 184, 1777](https://doi.org/10.1016/j.cpc.2013.02.014)); no Fortran compiler was available and retrieval of a prebuilt compiler from the release asset host failed. PySCF has relativistic methods but no validated finite-nucleus heavy-element workflow or picture-change-correct density export is bundled here. These are limitations, not computations. AtomDB numeric HF was used as a **comparison**, not relabelled as experimental, relativistic or generated by this project.
