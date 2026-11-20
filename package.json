@@ -1,7 +1,7 @@
 {
   "name": "react-vite-tailwind",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.5.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,9 @@
     "test:native": "bash scripts/test_native.sh",
     "test:browser": "playwright test",
     "bench": "node scripts/benchmark.mjs",
-    "data:hf": "python3 science/hf_export.py"
+    "data:hf": "python3 science/hf_export.py",
+    "data:matrix": "vite-node scripts/coverage.ts",
+    "data:check": "vite-node scripts/coverage.ts --check && vitest run src/data src/science"
   },
   "dependencies": {
     "clsx": "2.1.1",

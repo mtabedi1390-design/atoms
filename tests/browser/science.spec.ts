@@ -4,6 +4,7 @@ test("open-shell full-atom density integrates to the declared electron count", a
   await page.goto("/?z=6");
   await expect(page.locator("header.h-12")).toContainText("Carbon");
   await page.getByRole("button", { name: /Full-atom density/ }).click();
+  await page.getByRole("button", { name: /Model Σ/ }).click();
   await expect(page.locator("header.h-12")).toContainText("independent-electron density");
   await expect(page.locator("header.h-12")).toContainText("∫ρ = 6.000");
   await expect(page.getByRole("button", { name: "PySCF HF (offline)" })).toBeEnabled();
@@ -35,6 +36,7 @@ test("elements without an offline HF dataset expose the limitation, not fabricat
 
 test("subshell visibility and opacity are functional state", async ({ page }) => {
   await page.goto("/?z=10&mode=atom");
+  await page.getByRole("button", { name: /Model Σ/ }).click();
   const rows = page.locator('[data-testid="layer-row"]');
   await expect(rows).toHaveCount(3);
   const first = rows.first();
@@ -68,4 +70,31 @@ test("WebGL2 fallback is surfaced while analytical panels remain usable", async 
   await page.goto("/");
   await expect(page.getByText("WebGL2 renderer unavailable")).toBeVisible();
   await expect(page.getByText("Radial probability distribution")).toBeVisible();
+});
+
+test('every grid cell selects its own neutral record', async ({page}) => {
+  // Disable GPU for this navigation sweep; separate tests exercise the real WebGL path.
+  await page.addInitScript(() => { HTMLCanvasElement.prototype.getContext = () => null; });
+  await page.goto('/?samples=25000');
+  const cells=page.getByRole('gridcell');
+  await expect(cells).toHaveCount(118);
+  for (let i=0;i<118;i++) {
+    await cells.nth(i).click();
+    await expect(cells.nth(i)).toHaveAttribute('aria-selected','true');
+    await expect(page.locator('header.h-12')).toContainText(`Z = ${i+1} ·`);
+  }
+});
+
+test('switching an ion orbital into HF mode clears phase and orbital-only controls', async ({page})=>{
+  await page.goto('/?z=8&samples=25000');
+  await page.getByRole('button',{name:/exact O7\+ ion/}).click();
+  await page.getByRole('button',{name:'sign ψ'}).click();
+  await page.getByRole('button',{name:/Full-atom density/}).click();
+  await expect(page.getByRole('img',{name:'Total radial electron distribution'})).toBeVisible();
+  await expect(page.getByTestId('layer-row')).toHaveCount(0);
+  await expect(page.getByText(/sign of the real wavefunction/)).toHaveCount(0);
+  await expect(page.getByRole('checkbox',{name:/Probability current/})).toHaveCount(0);
+  await expect(page.getByRole('button',{name:'sign ψ'})).toBeDisabled();
+  await page.getByRole('button',{name:'Levels'}).click();
+  await expect(page.getByText(/no orbital eigenvalues/)).toBeVisible();
 });

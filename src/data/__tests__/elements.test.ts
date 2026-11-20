@@ -50,10 +50,10 @@ describe("118-element database", () => {
       expect(e.mass.source.length).toBeGreaterThan(10);
       expect(e.mass.value).toBeGreaterThan(0);
     }
-    expect(elementByZ(1).ionizationEnergy_eV.value).toBeCloseTo(13.598, 3);
+    expect(elementByZ(1).ionizationEnergy_eV.value).toBeCloseTo(13.5984346, 6);
     expect(elementByZ(2).ionizationEnergy_eV.value).toBeCloseTo(24.587, 3);
     expect(elementByZ(118).ionizationEnergy_eV.value).toBeNull();
-    expect(elementByZ(43).massKind).toBe("mass number of longest-lived isotope");
+    expect(elementByZ(43).massKind).toBe("representative isotope mass number");
   });
 });
 

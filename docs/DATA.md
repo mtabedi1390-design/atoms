@@ -1,44 +1,34 @@
-# Atomic data provenance
+# Atomic data: provenance and reproduction
 
-## Workspace reality
+`src/data/neutral.json` is a normalized snapshot, not a live query. On 2026-11-20 two versioned PyPI wheels were retrieved; `science/import_neutral.py` checks their SHA-256 values **before reading** the SQLite database and Python literal tables. The importer uses only the Python 3.11 standard library and executes neither package. Upstream datasets need not be redistributed in full.
 
-The continuation directive describes a generated data pipeline with pinned source snapshots. Those
-files were **not present** in this workspace. The 118-element table in `src/data/elements.ts` was
-compiled by hand in the earlier session and is validated structurally here. It has not been
-re-generated from pinned machine-readable snapshots. Treat values as transcribed citations and
-re-verify against the live sources before publication.
+```sh
+mkdir -p /tmp/atoms-data
+python3 -m pip download --no-deps --only-binary=:all: -d /tmp/atoms-data mendeleev==1.3.0 periodictable==2.1.0
+python3 science/import_neutral.py /tmp/atoms-data/mendeleev-1.3.0-py3-none-any.whl /tmp/atoms-data/periodictable-2.1.0-py3-none-any.whl
+npm run data:matrix
+npm run data:check
+git diff --exit-code -- src/data/neutral.json docs/ACCURACY_MATRIX.md
+```
 
-## Fields and sources
+| Snapshot | SHA-256 |
+|---|---|
+| [mendeleev 1.3.0](https://pypi.org/project/mendeleev/1.3.0/#files) | `76f415767b654634e51dead755513ef431abf200e892eab8468aa659ff218d1c` |
+| [periodictable 2.1.0](https://pypi.org/project/periodictable/2.1.0/#files) | `e9155d2bf5ac10050abeff2f99096d4f04312c0c8a6bb432e28744367c5064b3` |
+| normalized JSON | `46bf2a83c901b406f8f74c67357f25ca9178ce881840cb6fb14e920db068a00a` |
 
-| Field | Definition / convention | Source | Evidence classes |
-|---|---|---|---|
-| Z, symbol, name | IUPAC | IUPAC periodic table | evaluated |
-| mass | standard atomic weight (u); for elements without one, **mass number of longest-lived isotope** in brackets | IUPAC/CIAAW 2021 abridged | evaluated / measured |
-| category, group, period, block | 18-column table; La/Ac/Lu/Lr placed in d-block cells, other lanthanides/actinides in f-block rows | IUPAC layout | evaluated |
-| ground configuration | noble-gas shorthand from Aufbau + validated exceptions (Cr, Cu, Nb, Mo, Ru, Rh, Pd, Ag, La, Ce, Gd, Pt, Au, Ac, Th, Pa, U, Np, Cm, Lr) | NIST ASD ground levels | evaluated; `predicted` for Z ≥ 104 |
-| ionization energy | first ionization energy of the neutral atom (eV) | NIST ASD ionization energies | evaluated/measured; `unavailable` = null |
-| covalent radius | single-bond covalent radius (pm), Cordero et al., Dalton Trans. 2008, 2832 | Cordero 2008 | evaluated; null beyond Z=96 |
+These are pinned **secondary distributions** of evaluated facts, not newly downloaded primary NIST or CIAAW tables. Upstream versions may differ from the latest primary evaluation. See `docs/licenses/` for the mendeleev MIT notice. The periodictable mass module is marked public domain. Attribution does not grant blanket permission to redistribute third-party publications.
 
-**Do not conflate:** standard atomic weight ≠ isotope mass; covalent radius ≠ van der Waals radius
-(the archived snapshot's PubChem radius was a vdW radius, a different property, and is not merged
-here); first ionization energy ≠ orbital eigenvalue ≠ total HF energy.
+| Fields | Source, interpretation and limitations |
+|---|---|
+| Z, symbol, name, period, group, block | mendeleev `elements` table; use Aluminium and Caesium spellings. The adopted group-3 layout places La/Ac in group 3; the rest of the detached series have null group. Position/block is a layout convention, not necessarily the differentiating electron. Category is the inherited ATOMS qualitative taxonomy, not a measured property. |
+| Neutral occupied shells | Z=1–108: mendeleev `ionizationenergies.ground_shells` for charge 0, from [NIST ASD](https://physics.nist.gov/PhysRefData/ASD/ionEnergy.html). Expand any source core (including Cd and Hg), validate quantum numbers, capacity, uniqueness and count **before** emitting occupations. Display shorthand relative to the preceding noble gas. Z=109–118 use `elements.electronic_configuration`. |
+| Evidence for configurations | Adopted/evaluated through Lr, not a claim of direct spectroscopic confirmation for every orbital. For Lr the adopted valence orbital is 7p. Conservatively flag all Z≥104 as predicted. Ds/Rg predictions now use 6d⁹7s¹ / 6d¹⁰7s¹; this is a source choice, not an experimental correction. |
+| Ground level, including J | Preserve `ground_level` for the same neutral row; no inference from Hund's rules. `*` means odd parity; `2P*<1/2>` includes J=½. Some heavy entries contain only J. Z=109–118: null. A reference term does not make a model density term-resolved. |
+| First ionization energy | Neutral `ionization_energy`, in eV, with `uncertainty`, reference identifiers and separate theoretical/semi-empirical flags. H is a high-precision theoretical entry; Rf and Db are also theoretical. Null beyond Hs. This is **not** the plotted orbital eigenvalue, HF total energy or a Slater energy. |
+| Atomic weight / A | `periodictable.mass.element_mass`, based on [CIAAW 2021](https://doi.org/10.1515/pac-2019-0603). 84 standard weights; display a dimensionless abridged/representative value, preserving source uncertainty notation in `weight`. An interval is not an exact constant for every sample. For the other 34 use the source's bracketed nominal **mass number**, not a mass in u, a precise isotope mass, or a claim about the latest longest half-life. |
+| Covalent radius | `elements.covalent_radius_cordero` in pm (96 entries). [Cordero et al.](https://doi.org/10.1039/B801115J); the secondary table averages alternatives for C, Mn, Fe and Co. Not a vdW radius, mean electron radius or display boundary. No radius beyond Cm. |
 
-## Integrity enforcement (tests)
+Scientific comparisons with the baseline: 118 configurations checked; 2 changed. 102 IE values, 14 radius values and 58 mass values changed (often precision or convention). Across these four fields 110 distinct records differ. All 118 gained pinned provenance. A value that remains identical is not counted as a correction.
 
-* exactly 118 elements; unique Z/symbol/name; Z = index+1
-* neutral-atom electron count = Z
-* Pauli capacity 2(2l+1) per subshell
-* documented configuration exceptions (including Lr 7s²7p¹)
-* block/group/period ranges
-* predicted vs evaluated flags for Z ≥ 104
-* missing values are `null` with `unavailable` evidence (never 0/fabricated)
-* Slater Z_eff textbook checks (N 2p 3.90, Zn 4s 4.35, Zn 3d 8.85, K 4s 2.20)
-
-## HF data (`src/data/hf/*.json`, `atoms.hf-radial.v1`)
-
-Generated by `python3 science/hf_export.py` with PySCF 2.15.1 (Apache-2.0), RHF/ROHF,
-aug-cc-pVTZ, point nucleus, non-relativistic. Fields: engine/version/licence, method, term, basis,
-SCF convergence & cycles, energy (Ha/eV), numerical-HF-limit reference and source, basis error,
-radial grid, spherical density, angular grid, quadrature, integrated electrons, tolerances,
-known limitations, command, generation date. Validation tests re-integrate 4πr²ρ (within 2×10⁻³ e)
-and compare energies with the HF limits (variationality + < 0.02 Ha).
+HF JSON files are independently **computed** artifacts, not part of the element-data import. Their basis sets, SCF convergence, reference energies, angular averaging and radial integration are documented in [models](MODELS.md) and [validation](HF_VALIDATION.md).

@@ -1,0 +1,9 @@
+# What the images represent
+
+The primary object is a neutral atom in an adopted ground-state electronic configuration. For a many-electron state the spatial electron density is a one-body marginal: integrate the squared many-body wavefunction over the other electrons and sum over spin, with multiplicity N. Its integral is N. There is generally no unique, measurable set of individual electron orbitals. ATOMS does not solve for a correlated many-electron wavefunction.
+
+**Model A** produces a one-electron Coulomb eigenstate. H is neutral; all higher nuclear charges describe ions with charge +(Z−1). **Model B** assigns screened hydrogenic orbitals to a neutral configuration. The full-atom cloud is an ensemble average, not a specific oriented open-shell substate. **HF** supplies only a spherical total density and total electronic energy from a finite-basis determinant calculation. There is no inverse operation here to recover signs, complex phase, current or subshell layers from that density.
+
+Probabilistic sampling, nonlinear color mapping and additive blending are display choices. Counting equal-weight points in a region is meaningful in aggregate; reading an absolute density off the brightness of one screen pixel is not. Radial plots and numerical integrals are the quantitative panels. The nucleus marker exaggerates size. No panel shows an electron path or a literal hard edge of an atom.
+
+No correlated, finite-nucleus or relativistic density provider was validated for this release. In particular a screened 7s, 7p or 6d picture is not evidence for the size of relativistic contraction or a spin–orbit splitting. Superheavy configurations remain predictions even when their electron counts validate exactly. The project models atomic structure, not spectra, external fields, transitions, collisions, molecules or hardware experiments.

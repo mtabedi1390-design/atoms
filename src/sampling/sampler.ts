@@ -21,8 +21,8 @@ export interface SamplingParams extends QuantumNumbers {
   readonly modelId: string;
   /**
    * "single": the single state (n,l,m).
-   * "subshell-average": spherically-averaged subshell density, i.e. each sample draws m
-   * uniformly from −l…l (complex basis). By Unsöld's theorem Σ_m|Y_lm|² = (2l+1)/4π, so the
+   * "subshell-average": spherically-averaged subshell density, uniform angular density, equivalent
+   * to an equal mixture of m from −l…l. By Unsöld's theorem Σ_m|Y_lm|² = (2l+1)/4π, so the
    * density assigned to each sample is R²/(4π). Used for Mode B (independent-electron atom).
    */
   readonly mix?: "single" | "subshell-average" | "tabulated" | "tabulated-hf";
@@ -39,6 +39,7 @@ export interface SampleResult {
   density: Float32Array;
   /** real basis: sign of ψ (±1). complex basis: phase angle arg ψ in (−π, π]. */
   phase: Float32Array;
+  cdfMs: number;
   maxDensity: number;
   rMax: number;
   radial: { includedMass: number; tailMass: number; expansions: number };
@@ -228,10 +229,10 @@ export class SamplerCache {
 export function sampleOrbital(p: SamplingParams, cache: SamplerCache, onProgress?: (frac: number) => void, shouldCancel?: () => boolean): SampleResult | null {
   const tabulated = p.mix === "tabulated-hf" || p.mix === "tabulated";
   const mix = p.mix === "subshell-average";
+  const start = performance.now();
   const T = cache.tables(tabulated ? p : mix ? { ...p, m: 0, basis: "complex" } : p);
   const dom = { includedMass: T.radial.rawMass, tailMass: Math.max(0, 1 - T.radial.rawMass), expansions: 0 };
-  const thetaTables: CdfTable[] = [];
-  if (mix) for (let mm = -p.l; mm <= p.l; mm++) thetaTables.push(cache.tables({ ...p, m: mm, basis: "complex" }).theta);
+  const cdfMs = performance.now() - start;
   const rng = new Xoshiro128(p.seed);
   const N = p.count;
   const positions = new Float32Array(N * 3);
@@ -256,8 +257,8 @@ export function sampleOrbital(p: SamplingParams, cache: SamplerCache, onProgress
       if (d > maxDensity) maxDensity = d;
       continue;
     }
-    const thetaTable = mix ? thetaTables[Math.min(thetaTables.length - 1, Math.floor(rng.next() * thetaTables.length))] : T.theta;
-    const theta = sampleFromCdf(thetaTable, rng.next());
+    // The uniform-m ensemble has exactly uniform solid-angle density (addition theorem).
+    const theta = mix ? Math.acos(2*rng.next()-1) : sampleFromCdf(T.theta, rng.next());
     const phi = T.phi ? sampleFromCdf(T.phi, rng.next()) : 2 * Math.PI * rng.next();
     const st = Math.sin(theta);
     positions[3 * i] = r * st * Math.cos(phi);
@@ -287,5 +288,5 @@ export function sampleOrbital(p: SamplingParams, cache: SamplerCache, onProgress
   }
   onProgress?.(1);
   const electrons = tabulated ? T.radial.rawMass : (p.occupancy ?? 1) * dom.includedMass;
-  return { positions, density, phase, maxDensity, rMax: T.rMax, radial: dom, electrons };
+  return { cdfMs, positions, density, phase, maxDensity, rMax: T.rMax, radial: dom, electrons };
 }
