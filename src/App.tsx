@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Analytics } from "@vercel/analytics/react";
 import { cn } from "@/utils/cn";
 import { ControlRail } from "@/components/ControlRail";
 import { EnergyDiagram } from "@/components/EnergyDiagram";
@@ -279,6 +280,7 @@ export default function App() {
           </div>
         </aside>
       </div>
+      <Analytics />
     </div>
   );
 }
