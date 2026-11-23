@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { Analytics } from "@vercel/analytics/react";
 import { cn } from "@/utils/cn";
 import { ControlRail } from "@/components/ControlRail";
 import { EnergyDiagram } from "@/components/EnergyDiagram";
@@ -218,6 +219,7 @@ export default function App() {
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-black text-zinc-200" style={{ fontFamily: "'IBM Plex Sans', ui-sans-serif, system-ui, sans-serif" }}>
+      <Analytics />
       <TelemetryBar element={element} sub={sub} m={state.m} model={state.model} mode={state.mode} densitySource={useHF ? "PySCF HF (bundled)" : state.model === "hydrogenic-exact" ? "exact hydrogenic" : "Slater estimate"} electrons={electrons} samples={specs.reduce((a, s) => a + (s.visible ? s.params.count : 0), 0)} stats={stats} sampleMs={sampleMs} progress={progress} workerError={workerError} />
       <div className="flex min-h-0 flex-1">
         <aside className={cn("w-[340px] shrink-0 border-r border-zinc-800 bg-zinc-950 lg:block", mobilePanel === "controls" ? "fixed inset-y-12 left-0 z-20 block w-[88vw] max-w-[340px]" : "hidden")}>
